@@ -134,6 +134,8 @@ def clients_page():
     selected_client = client_map[selected_label]
     client_id = selected_client["_id"]
 
+    st.divider()
+
     # Initialize edit mode state
     if "edit_client_id" not in st.session_state:
         st.session_state.edit_client_id = None
@@ -477,16 +479,40 @@ def dashboard_page():
     _render_analysis_history(user_id, active_client["_id"])
 
 
-def main_app():
-    st.sidebar.title("Navigation")
-    page = st.sidebar.radio("Go to", ["Dashboard", "Manage Clients"])
+def _sidebar_nav():
+    st.sidebar.markdown("# CloserAI")
+    st.sidebar.markdown("---")
+    
+    # Initialize the current page in session state if not there
+    if "current_page" not in st.session_state:
+        st.session_state.current_page = "Dashboard"
 
-    if st.sidebar.button("Logout"):
+    # Navigation Buttons with unique styling
+    # We use 'use_container_width' to make them large and fill the sidebar
+    if st.sidebar.button("Dashboard", use_container_width=True, 
+                         type="primary" if st.session_state.current_page == "Dashboard" else "secondary"):
+        st.session_state.current_page = "Dashboard"
+        st.rerun()
+
+    if st.sidebar.button("Manage Clients", use_container_width=True, 
+                         type="primary" if st.session_state.current_page == "Manage Clients" else "secondary"):
+        st.session_state.current_page = "Manage Clients"
+        st.rerun()
+
+    st.sidebar.markdown("---")
+    
+    # Logout button at the very bottom
+    if st.sidebar.button("Logout", use_container_width=True):
         logout()
 
-    if page == "Dashboard":
+def main_app():
+    # 1. Render the new custom sidebar
+    _sidebar_nav()
+
+    # 2. Render the actual page based on the button clicked
+    if st.session_state.current_page == "Dashboard":
         dashboard_page()
-    elif page == "Manage Clients":
+    elif st.session_state.current_page == "Manage Clients":
         clients_page()
 
 
