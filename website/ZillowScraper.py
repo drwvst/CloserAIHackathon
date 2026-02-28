@@ -2,7 +2,7 @@ import re
 from typing import Any
 
 import pandas as pd
-from homeharvest import scrape_property
+from homeharvest import scrape_property # type: ignore
 
 
 def extract_address_from_url(url: str) -> str | None:
@@ -32,8 +32,8 @@ def _safe_int(value: Any, default: int = 0) -> int:
 def _safe_str(value: Any, default: str = "") -> str:
     return str(value) if not pd.isna(value) else default
 
-        if target_zpid and row_url and f"/{target_zpid}_zpid" in row_url:
-            score += 1_000  # hard match
+    # if target_zpid and row_url and f"/{target_zpid}_zpid" in row_url:
+    #     score += 1_000  # hard match
 
 def normalize_property_row(row: pd.Series) -> dict[str, Any]:
     price = _safe_float(row.get("list_price"), 0)

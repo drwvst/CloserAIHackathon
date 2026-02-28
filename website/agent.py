@@ -5,7 +5,6 @@ from typing import Any
 
 import streamlit as st
 
-
 def _monthly_budget(client_profile: dict[str, Any]) -> float:
     income = float(client_profile.get("income", 0))
     monthly_debt = float(client_profile.get("monthly_debt", 0))
