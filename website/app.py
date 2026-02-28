@@ -51,7 +51,7 @@ def main_app():
     if page == "Analyze Property":
         analyze_page()
 
-    elif page == "About / Profile":
+    elif page == "Profile":
         profile_page()
 
 
