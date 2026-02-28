@@ -29,24 +29,30 @@ def login_page():
         email = st.text_input("Email", key="login_email")
         password = st.text_input("Password", type="password", key="login_password")
         if st.button("Login"):
-            success, result = authenticate_user(email, password)
-            if success:
-                st.session_state.authenticated = True
-                st.session_state.user = result
-                st.success("Logged in successfully!")
-                st.rerun()
-            else:
-                st.error(result)
+            try:
+                success, result = authenticate_user(email, password)
+                if success:
+                    st.session_state.authenticated = True
+                    st.session_state.user = result
+                    st.success("Logged in successfully!")
+                    st.rerun()
+                else:
+                    st.error(result)
+            except Exception as exc:
+                st.error(f"Login failed: {exc}")
 
     with tab2:
         email = st.text_input("Email", key="signup_email")
         password = st.text_input("Password", type="password", key="signup_password")
         if st.button("Create Account"):
-            success, message = create_user(email, password)
-            if success:
-                st.success(message)
-            else:
-                st.error(message)
+            try:
+                success, message = create_user(email, password)
+                if success:
+                    st.success(message)
+                else:
+                    st.error(message)
+            except Exception as exc:
+                st.error(f"Sign up failed: {exc}")
 
 
 def logout():
