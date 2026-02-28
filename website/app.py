@@ -122,3 +122,10 @@ else:
 # -----------------------------
 def run_analysis(): 
     rentOrBuy = st.session_state.get("housing_choice")
+
+    # These are just examples, but want all necessary variables here to be accessible
+    # for the AI agent to use in it's calculations
+    income = st.session_state.get("income")
+    monthly_debt = st.session_state.get("monthly_debt")
+    savings = st.session_state.get("monthly_debt")    
+    credit_score = st.session_state.get("monthly_debt")   
