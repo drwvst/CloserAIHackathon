@@ -57,13 +57,21 @@ def login_page():
 
 # CLIENTS PAGE (view and edit client information)
 def clients_page():
+    
     st.title("Client Management")
     user = st.session_state.get("user")
     user_id = user["_id"]
 
+    # Initialize the expanded state for the registration form
+    if "reg_expanded" not in st.session_state:
+        st.session_state.reg_expanded = False
+
     # --- SECTION 1: ADD NEW CLIENT ---
-    with st.expander("➕ Register New Client", expanded=False):
-        with st.form("new_client_page_form"):
+    # We use the session state to control the 'expanded' parameter
+    with st.expander("➕ Register New Client", expanded=st.session_state.reg_expanded):
+        
+        # Adding clear_on_submit AND a unique key helps force a UI reset
+        with st.form("new_client_page_form", clear_on_submit=True):
             name = st.text_input("Full Name")
             email = st.text_input("Email")
             phone = st.text_input("Phone")
@@ -96,17 +104,33 @@ def clients_page():
                         "updated_at": datetime.now(timezone.utc),
                     }
                     get_clients_collection().insert_one(new_doc)
-                    st.success(f"Client {name} added successfully!")
-                    st.rerun()
+                    
+                    # 1. Update state to collapse the expander
+                    st.session_state.reg_expanded = False
+                    
+                    # Note: st.success might disappear too fast with st.rerun() 
+                    # but we need the rerun to collapse the expander.
+                    st.rerun() 
                 else:
                     st.error("Client name is required.")
+
+    # Only show this if the expander is CLOSED
+    if not st.session_state.reg_expanded:
+        if st.sidebar.button("➕ Open Client Registration"):
+            st.session_state.reg_expanded = True
+            st.rerun()
+    else:
+        # Show a cancel button if they want to close it without submitting
+        if st.button("Cancel Registration"):
+            st.session_state.reg_expanded = False
+            st.rerun()
 
     st.divider()
 
     # --- SECTION 2: VIEW & UPDATE EXISTING CLIENTS ---
     clients = _get_clients_for_user(user_id)
     if not clients:
-        st.info("No clients found. Use the form above to add your first one.")
+        st.info("No clients found. Open the registration tool above to add your first one.")
         return
 
     client_map = {f"{c['name']} ({c.get('email', 'N/A')})": c for c in clients}
@@ -154,19 +178,52 @@ def clients_page():
 
     # --- READ-ONLY VIEW ---
     else:
-        c_head, c_btn = st.columns([4, 1])
+        # 1. Create three columns for the Header, Update, and Delete buttons
+        c_head, c_edit, c_del = st.columns([3, 1, 1])
+        
         c_head.subheader(f"Details: {selected_client['name']}")
-        if c_btn.button("Update Information", type="secondary"):
+        
+        # Update Button
+        if c_edit.button("Update Info", use_container_width=True):
             st.session_state.edit_client_id = str(client_id)
             st.rerun()
 
-        # Clean display of original fields
+        # Delete Button (Red)
+        if c_del.button("Delete Client", type="primary", use_container_width=True):
+            # We set a temporary session state to show a confirmation dialog
+            st.session_state.confirm_delete = str(client_id)
+
+        # 2. Confirmation Dialog Logic
+        if st.session_state.get("confirm_delete") == str(client_id):
+            st.warning(f"Are you sure you want to permanently delete {selected_client['name']}? This will also remove all saved analyses.")
+            col_yes, col_no = st.columns(2)
+            
+            if col_yes.button("Yes, Delete Everything", type="primary", use_container_width=True):
+                # DELETE FROM DATABASE
+                # Remove the client
+                get_clients_collection().delete_one({"_id": client_id})
+                # Remove all associated analyses (Clean up)
+                get_analyses_collection().delete_many({"client_id": client_id})
+                
+                # Reset states and notify
+                st.session_state.confirm_delete = None
+                st.session_state.selected_client_id = None # Clear dashboard selection
+                st.toast(f"Client {selected_client['name']} deleted.", icon="🗑️")
+                st.rerun()
+                
+            if col_no.button("Cancel", use_container_width=True):
+                st.session_state.confirm_delete = None
+                st.rerun()
+
+        st.divider()
+
+        # 3. Standard Information Display
         st.write(f"**Email:** {selected_client.get('email')} | **Phone:** {selected_client.get('phone')}")
         p = selected_client.get("profile", {})
         st.write(f"**Income:** ${p.get('income', 0):,.0f} | **Debt:** ${p.get('monthly_debt', 0):,.0f} | **Savings:** ${p.get('savings', 0):,.0f}")
         st.write(f"**Credit Score:** {p.get('credit_score')}")
-        st.info(f"**Preferences:** {selected_client.get('preferences')}")
-        st.write(f"**Notes:** {selected_client.get('notes')}")
+        st.info(f"**Preferences:** {selected_client.get('preferences', 'None listed.')}")
+        st.write(f"**Notes:** {selected_client.get('notes', 'No notes.')}")
 
 
 def logout():
@@ -284,61 +341,81 @@ def _render_analysis_history(realtor_id: ObjectId, client_id: ObjectId):
 
 
 def dashboard_page():
-    st.title("Realtor Dashboard")
+    # 1. Fetch Data
     user_id = st.session_state.user["_id"]
     clients = _get_clients_for_user(user_id)
 
     if not clients:
+        st.title("Realtor Dashboard")
         st.warning("No clients found. Go to 'Manage Clients' to register one.")
         return
 
-    # Sidebar Switcher
+    # 2. Top-Level Selection (Moved from sidebar)
+    st.subheader("Selected Client")
     client_labels = [c["name"] for c in clients]
+    
+    # Maintain selection index
     current_idx = 0
     for i, c in enumerate(clients):
         if str(c["_id"]) == st.session_state.selected_client_id:
             current_idx = i
             break
     
-    selected_name = st.sidebar.selectbox("Active Client", options=client_labels, index=current_idx)
+    # Horizontal selection at the top
+    selected_name = st.selectbox(
+        "Choose a client to analyze properties for:", 
+        options=client_labels, 
+        index=current_idx,
+        label_visibility="collapsed" # Hides the redundant label for a cleaner look
+    )
     
-    # We define it here as 'active_client'
     active_client = next(c for c in clients if c["name"] == selected_name)
     st.session_state.selected_client_id = str(active_client["_id"])
 
-    # Main Analysis UI
-    st.subheader(f"Current Target: {active_client['name']}")
+    st.divider()
 
-    # --- ADDING PROFILE SUMMARY (Optional but helpful) ---
-    with st.expander("Quick View: Client Financials"):
-        p = active_client.get("profile", {})
-        st.write(f"**Income:** ${p.get('income', 0):,.0f} | **Debt:** ${p.get('monthly_debt', 0):,.0f} | **Credit:** {p.get('credit_score')}")
-
-    st.subheader("Analyze New Listing")
-    url = st.text_input("Paste listing URL (Zillow/Realtor)", key="listing_url")
+    # 3. Formatted Quick View (Fixed the "code formatting" issue)
+    st.markdown(f"### Financial Overview: {active_client['name']}")
+    p = active_client.get("profile", {})
     
-    if st.button("Run Analysis", type="primary"):
+    # Using columns and metrics for a polished, "Dashboard" feel
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Annual Income", f"${p.get('income', 0):,.0f}")
+    m2.metric("Monthly Debt", f"${p.get('monthly_debt', 0):,.0f}")
+    m3.metric("Total Savings", f"${p.get('savings', 0):,.0f}")
+    m4.metric("Credit Score", p.get('credit_score', 'N/A'))
+
+    st.divider()
+
+    # 4. Analysis Section
+    st.subheader("Analyze New Listing")
+    url = st.text_input("Paste listing URL (Zillow/Realtor)", key="listing_url", placeholder="https://www.zillow.com/homedetails/...")
+    
+    if st.button("Run Feasibility Analysis", type="primary"):
         if not url.strip():
             st.error("Please provide a listing URL.")
         else:
-            with st.spinner("Scraping listing + generating agent report..."):
+            with st.status("Gathering Intelligence...", expanded=True) as status:
                 try:
+                    st.write("🔍 Scraping listing data...")
                     listing = scrape_listing(url.strip())
+                    
+                    st.write("📊 Finding area comparables...")
                     comps = get_area_comps(listing.get("city"), listing.get("state"), max_results=5)
                     
-                    # FIXED: Changed 'selected_client' to 'active_client'
+                    st.write("🤖 Generating AI Agent report...")
                     report = generate_listing_report(active_client, listing, comps)
                     
-                    # FIXED: Changed 'selected_client' to 'active_client'
                     _save_analysis(user_id, active_client["_id"], url.strip(), listing, report)
                     
+                    status.update(label="Analysis Complete!", state="complete", expanded=False)
                     st.success("Analysis saved to client history.")
                     st.markdown(report["report_markdown"])
                 except Exception as exc:
+                    status.update(label="Analysis Failed", state="error")
                     st.error(f"Could not complete analysis: {exc}")
 
     st.divider()
-    # FIXED: Changed 'selected_client' to 'active_client'
     _render_analysis_history(user_id, active_client["_id"])
 
 
