@@ -7,7 +7,7 @@ import streamlit as st
 @st.cache_resource
 def get_database():
     client = MongoClient(st.secrets["MONGO_URI"], tlsAllowInvalidCertificates=True)
-    return client["homesense"]
+    return client["realtor_db"]
 
 
 def get_users_collection():
