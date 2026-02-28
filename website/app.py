@@ -94,39 +94,76 @@ def analyze_page():
 # -----------------------------
 def profile_page():
     st.title("Your Financial Profile")
-    user_doc = st.session_state.user
-    profile = user_doc.get("financial_profile", {})
 
-    with st.form("profile_form"):
-        income = st.number_input("Annual Income", value=profile.get("income", 0))
-        monthly_debt = st.number_input("Monthly Debt Payments", value=profile.get("monthly_debt", 0))
-        savings = st.number_input("Savings Available", value=profile.get("savings", 0))
-        credit_score = st.slider("Credit Score", 300, 850, profile.get("credit_score", 700))
+    user_doc = st.session_state.get("user")
+    if not user_doc:
+        st.error("User data not found. Please log in again.")
+        return
 
-        submitted = st.form_submit_button("Save")
+    # Use session state to track profile so the UI updates instantly
+    profile = st.session_state.user.get("financial_profile", {})
 
-        if submitted:
-            # Update MongoDB
-            users = get_users_collection()
-            users.update_one(
-                {"_id": user_doc["_id"]},
-                {"$set": {
-                    "financial_profile": {
-                        "income": income,
-                        "monthly_debt": monthly_debt,
-                        "savings": savings,
-                        "credit_score": credit_score
-                    }
-                }}
+    if "edit_mode" not in st.session_state:
+        st.session_state.edit_mode = False
+
+    # ----------------------------
+    # EDITABLE FORM
+    # ----------------------------
+    if st.session_state.edit_mode:
+        with st.form("profile_form"):
+            income = st.number_input(
+                "Annual Income", value=float(profile.get('income', 0)), step=1000.0
             )
-            # Update session data
-            st.session_state.user["financial_profile"] = {
-                "income": income,
-                "monthly_debt": monthly_debt,
-                "savings": savings,
-                "credit_score": credit_score
-            }
-            st.success("Profile updated successfully.")
+            monthly_debt = st.number_input(
+                "Monthly Debt Payments", value=float(profile.get('monthly_debt', 0)), step=100.0
+            )
+            savings = st.number_input(
+                "Savings Available", value=float(profile.get('savings', 0)), step=100.0
+            )
+            credit_score = st.slider(
+                "Credit Score", 300, 850, value=int(profile.get('credit_score', 700))
+            )
+
+            submitted = st.form_submit_button("Save Changes")
+
+            if submitted:
+                new_profile = {
+                    "income": income,
+                    "monthly_debt": monthly_debt,
+                    "savings": savings,
+                    "credit_score": credit_score
+                }
+                
+                # 1. Update MongoDB
+                users = get_users_collection()
+                users.update_one(
+                    {"_id": user_doc["_id"]},
+                    {"$set": {"financial_profile": new_profile}}
+                )
+
+                # 2. Update session state
+                st.session_state.user["financial_profile"] = new_profile
+                st.session_state.edit_mode = False 
+                
+                # 3. Trigger a rerun to show the Read-Only view with new data
+                st.rerun() 
+        
+        if st.button("Cancel"):
+            st.session_state.edit_mode = False
+            st.rerun()
+
+    # ----------------------------
+    # READ-ONLY VIEW
+    # ----------------------------
+    else:
+        st.write(f"**Annual Income:** ${profile.get('income', 0):,.2f}")
+        st.write(f"**Monthly Debt Payments:** ${profile.get('monthly_debt', 0):,.2f}")
+        st.write(f"**Savings Available:** ${profile.get('savings', 0):,.2f}")
+        st.write(f"**Credit Score:** {profile.get('credit_score', 700)}")
+
+        if st.button("Update Information"):
+            st.session_state.edit_mode = True
+            st.rerun() # Force rerun to switch to the form view
 
 # -----------------------------
 # AI LOGIC
