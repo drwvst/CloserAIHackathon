@@ -323,7 +323,8 @@ def _save_analysis(realtor_id: ObjectId, client_id: ObjectId, url: str, listing:
 
 
 def _render_analysis_history(realtor_id: ObjectId, client_id: ObjectId):
-    st.subheader("Saved Listing Analyses")
+    st.subheader("Favorite Listings") # Renamed from 'Saved Analyses'
+    
     analyses = list(
         get_analyses_collection()
         .find({"realtor_id": realtor_id, "client_id": client_id})
@@ -331,15 +332,42 @@ def _render_analysis_history(realtor_id: ObjectId, client_id: ObjectId):
     )
 
     if not analyses:
-        st.info("No analyses saved for this client yet.")
+        st.info("No favorites yet. Analyze a property and click 'Add to Favorites'.")
         return
 
     for item in analyses:
         result = item.get("result", {})
-        with st.expander(f"{item.get('url')} • Fit Score {result.get('fit_score', 'N/A')}"):
-            st.caption(f"Model: {result.get('model_used', 'unknown')}")
-            st.markdown(result.get("report_markdown", "No report available."))
+        listing_data = item.get("listing", {})
+        
+        with st.container(border=True):
+            # Column 1: Placeholder for Photo
+            # Column 2: Address and Score
+            # Column 3: Delete Button
+            col_thumb, col_info, col_del = st.columns([1, 4, 1])
+            
+            with col_thumb:
+                # img_url = listing_data.get("img_src")
+                # st.image(img_url, use_container_width=True)
+                st.markdown("🏠") 
 
+            with col_info:
+                street = listing_data.get("street", "Unknown Address")
+                city = listing_data.get("city", "")
+                state = listing_data.get("state", "")
+                st.markdown(f"**{street}, {city} {state}**")
+                
+                score = result.get("fit_score", "N/A")
+                st.markdown(f"**Fit Score:** {score}/100")
+
+            with col_del:
+                # Unique key is essential because we are in a loop
+                if st.button("🗑️", key=f"del_{item['_id']}"):
+                    get_analyses_collection().delete_one({"_id": item["_id"]})
+                    st.toast("Removed from favorites")
+                    st.rerun()
+
+            with st.expander("View Property Report"):
+                st.markdown(result.get("report_markdown", "No report available."))
 
 def dashboard_page():
     # 1. Fetch Data
@@ -392,30 +420,59 @@ def dashboard_page():
     st.subheader("Analyze New Listing")
     url = st.text_input("Paste listing URL (Zillow/Realtor)", key="listing_url", placeholder="https://www.zillow.com/homedetails/...")
     
-    if st.button("Run Feasibility Analysis", type="primary"):
+    if st.button("Run Property Analysis", type="primary"):
         if not url.strip():
             st.error("Please provide a listing URL.")
         else:
-            with st.status("Gathering Intelligence...", expanded=True) as status:
+            with st.status("Analyzing...", expanded=True) as status:
                 try:
-                    st.write("🔍 Scraping listing data...")
                     listing = scrape_listing(url.strip())
-                    
-                    st.write("📊 Finding area comparables...")
                     comps = get_area_comps(listing.get("city"), listing.get("state"), max_results=5)
-                    
-                    st.write("🤖 Generating AI Agent report...")
                     report = generate_listing_report(active_client, listing, comps)
                     
-                    _save_analysis(user_id, active_client["_id"], url.strip(), listing, report)
-                    
-                    status.update(label="Analysis Complete!", state="complete", expanded=False)
-                    st.success("Analysis saved to client history.")
-                    st.markdown(report["report_markdown"])
+                    # Store in session state for a "Preview" before saving
+                    st.session_state.temp_analysis = {
+                        "url": url.strip(),
+                        "listing": listing,
+                        "result": report
+                    }
+                    status.update(label="Analysis Complete!", state="complete")
                 except Exception as exc:
-                    status.update(label="Analysis Failed", state="error")
-                    st.error(f"Could not complete analysis: {exc}")
+                    st.error(f"Analysis failed: {exc}")
 
+    # --- Persisted Report View ---
+    # This section stays visible even after clicking 'Add to Favorites'
+    if "temp_analysis" in st.session_state:
+        temp = st.session_state.temp_analysis
+        st.divider()
+        st.markdown("### New Analysis Preview")
+        st.markdown(temp["result"]["report_markdown"])
+        
+        # We use a specific column ratio to keep them tight or wide. 
+        # [1, 1] ensures the space is split exactly 50/50.
+        btn_col1, btn_col2 = st.columns([1, 1])
+        
+        with btn_col1:
+            if st.button("Add to Favorites", type="primary", use_container_width=True):
+                _save_analysis(
+                    user_id, 
+                    active_client["_id"], 
+                    temp["url"], 
+                    temp["listing"], 
+                    temp["result"]
+                )
+                del st.session_state.temp_analysis
+                st.toast("Listing added to favorites!", icon="⭐")
+                st.rerun()
+                
+        with btn_col2:
+            # type="primary" makes it red. 
+            # use_container_width=True forces it to match the 'Add' button size exactly.
+            if st.button("Discard Analysis", use_container_width=True):
+                del st.session_state.temp_analysis
+                st.rerun()
+
+    # 5. Restore the Favorites History
     st.divider()
     _render_analysis_history(user_id, active_client["_id"])
 
