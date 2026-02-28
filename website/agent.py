@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+import re
+
 import streamlit as st
 
 def _monthly_budget(client_profile: dict[str, Any]) -> float:
@@ -43,11 +45,11 @@ def _build_prompt(client: dict[str, Any], listing: dict[str, Any], comps: list[d
 You are a real-estate analyst assistant for a realtor dashboard.
 Given the client profile, listing data, and area comps, produce a concise markdown report with these sections:
 1) Executive Summary
-2) Fit Assessment (financial + preference match)
-3) Location Intelligence (crime/schools/weather/traffic as practical cautions and due diligence prompts)
-4) Property Risk Watchlist (e.g., roof/HVAC/foundation based on age and context)
+2) Fit Assessment
+3) Location Intelligence
+4) Property Risk Watchlist
 5) Suggested Nearby Alternatives (2-3 options from comps)
-6) Realtor Next Steps (questions to ask listing agent)
+6) Realtor Next Steps
 
 Client:
 {client}
@@ -58,8 +60,43 @@ Listing:
 Area comparables:
 {comps}
 
-Important: Be explicit about assumptions and uncertainty when data is inferred.
+Important constraints:
+- Keep the report concise and scannable with short bullets.
+- Do not include follow-up prompts (no "if you'd like", "let me know", or questions to the user).
+- Preserve normal spacing and punctuation.
+- Be explicit about assumptions and uncertainty when data is inferred.
 """.strip()
+
+
+
+
+def _clean_report_markdown(report_md: str) -> str:
+    """Normalize occasional malformed spacing/newline artifacts from model output."""
+    lines = report_md.splitlines()
+    cleaned: list[str] = []
+    letter_buffer: list[str] = []
+
+    def flush_letters() -> None:
+        if letter_buffer:
+            cleaned.append("".join(letter_buffer))
+            letter_buffer.clear()
+
+    for raw_line in lines:
+        line = raw_line.strip()
+        if re.fullmatch(r"[A-Za-z0-9]", line):
+            letter_buffer.append(line)
+            continue
+
+        flush_letters()
+        cleaned.append(raw_line)
+
+    flush_letters()
+
+    text = "\n".join(cleaned)
+    text = re.sub(r"\bif you['’]d like\b[^.?!]*[.?!]", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\b(let me know|would you like|can I)\b[^.?!]*[.?!]", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
 
 
 def generate_listing_report(client: dict[str, Any], listing: dict[str, Any], comps: list[dict[str, Any]]) -> dict[str, Any]:
@@ -83,7 +120,7 @@ def generate_listing_report(client: dict[str, Any], listing: dict[str, Any], com
                 input=prompt,
                 reasoning={"effort": "low"},
             )
-            report_md = response.output_text
+            report_md = _clean_report_markdown(response.output_text)
             model_used = "gpt-5-nano"
         except Exception:
             report_md = None
@@ -92,7 +129,7 @@ def generate_listing_report(client: dict[str, Any], listing: dict[str, Any], com
         comp_lines = "\n".join(
             [f"- {c['street']}: ${c['price']:,.0f}, {c['beds']} bd, {c['baths']} ba, {c['sqft']:,} sqft" for c in comps[:3]]
         ) or "- No nearby comparable listings were available at analysis time."
-        report_md = f"""
+        report_md = _clean_report_markdown(f"""
 ### Executive Summary
 This listing has a **fit score of {fit_score}/100** for this client profile.
 
@@ -118,7 +155,7 @@ This listing has a **fit score of {fit_score}/100** for this client profile.
 1. Verify taxes, HOA dues, and insurance quote.
 2. Confirm school assignment and commute time.
 3. Request disclosures focused on roof, HVAC, plumbing, and major repairs.
-""".strip()
+""".strip())
 
     return {
         "fit_score": fit_score,

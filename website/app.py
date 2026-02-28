@@ -68,7 +68,7 @@ def _get_clients_for_user(user_id: ObjectId):
 
 
 def _create_client_form(user_id: ObjectId):
-    with st.expander("+ Add New Client", expanded=False):
+    with st.sidebar.expander("+ Add New Client", expanded=False):
         with st.form("new_client_form"):
             name = st.text_input("Client Name")
             email = st.text_input("Client Email")
