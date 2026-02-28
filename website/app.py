@@ -1,15 +1,7 @@
 from datetime import datetime, timezone
-from pathlib import Path
-import sys
 
 import streamlit as st
 from bson import ObjectId
-
-# Ensure repository root is importable when running:
-#   streamlit run website/app.py
-REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
 
 from agent import generate_listing_report
 from auth import authenticate_user, create_user
