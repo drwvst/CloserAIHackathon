@@ -14,12 +14,6 @@ def extract_address_from_url(url: str) -> str | None:
     return address_part.replace("-", " ")
 
 
-def extract_zpid_from_url(url: str) -> str | None:
-    """Extract a Zillow property id when present in URL format .../<id>_zpid/."""
-    match = re.search(r"/(\d+)_zpid", url)
-    return match.group(1) if match else None
-
-
 def get_tax_estimate(price: float, state: str, fips_code: str) -> float:
     """Estimate annual tax when listing data omits it."""
     if state == "TX":
@@ -38,46 +32,8 @@ def _safe_int(value: Any, default: int = 0) -> int:
 def _safe_str(value: Any, default: str = "") -> str:
     return str(value) if not pd.isna(value) else default
 
-
-def _norm_tokens(text: str) -> set[str]:
-    return set(re.findall(r"[a-z0-9]+", text.lower()))
-
-
-def _pick_best_listing_row(data: pd.DataFrame, url: str, address: str) -> pd.Series:
-    """Pick the most likely row for the requested URL instead of always first row."""
-    target_zpid = extract_zpid_from_url(url)
-    target_tokens = _norm_tokens(address)
-
-    best_idx = None
-    best_score = -1
-
-    for idx, row in data.iterrows():
-        score = 0
-        row_url = _safe_str(row.get("property_url"), "")
-
         if target_zpid and row_url and f"/{target_zpid}_zpid" in row_url:
             score += 1_000  # hard match
-
-        row_text = " ".join(
-            [
-                _safe_str(row.get("street"), ""),
-                _safe_str(row.get("city"), ""),
-                _safe_str(row.get("state"), ""),
-                _safe_str(row.get("zip_code"), ""),
-            ]
-        )
-        overlap = len(_norm_tokens(row_text) & target_tokens)
-        score += overlap
-
-        if score > best_score:
-            best_score = score
-            best_idx = idx
-
-    if best_idx is None:
-        return data.iloc[0]
-
-    return data.loc[best_idx]
-
 
 def normalize_property_row(row: pd.Series) -> dict[str, Any]:
     price = _safe_float(row.get("list_price"), 0)
@@ -111,7 +67,6 @@ def normalize_property_row(row: pd.Series) -> dict[str, Any]:
         "street": _safe_str(row.get("street"), ""),
         "latitude": _safe_float(row.get("latitude"), 0),
         "longitude": _safe_float(row.get("longitude"), 0),
-        "property_url": _safe_str(row.get("property_url"), ""),
     }
 
 
@@ -125,8 +80,7 @@ def scrape_listing(url: str) -> dict[str, Any]:
     if data.empty:
         raise ValueError("No listing data found for this URL.")
 
-    best_row = _pick_best_listing_row(data, url, address)
-    return normalize_property_row(best_row)
+    return normalize_property_row(data.iloc[0])
 
 
 def get_area_comps(city: str, state: str, max_results: int = 5) -> list[dict[str, Any]]:

@@ -72,10 +72,7 @@ def generate_listing_report(client: dict[str, Any], listing: dict[str, Any], com
     report_md: str | None = None
     model_used = "rules-only"
 
-    try:
-        api_key = st.secrets.get("OPENAI_API_KEY") if hasattr(st, "secrets") else None
-    except Exception:
-        api_key = None
+    api_key = st.secrets.get("OPENAI_API_KEY") if hasattr(st, "secrets") else None
     if api_key:
         try:
             from openai import OpenAI
