@@ -1,21 +1,32 @@
+from datetime import datetime, timezone
+from pathlib import Path
+import sys
+
 import streamlit as st
+from bson import ObjectId
+
+# Ensure repository root is importable when running:
+#   streamlit run website/app.py
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from agent import generate_listing_report
 from auth import authenticate_user, create_user
-from database import get_users_collection
+from database import get_analyses_collection, get_clients_collection
+from ZillowScraper import get_area_comps, scrape_listing
 
 st.set_page_config(page_title="CloserAI", layout="wide")
 
-# -----------------------------
-# Session Initialization
-# -----------------------------
+
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
-
 if "user" not in st.session_state:
-    st.session_state.user = None  # stores full user document from MongoDB
+    st.session_state.user = None
+if "selected_client_id" not in st.session_state:
+    st.session_state.selected_client_id = None
 
-# -----------------------------
-# LOGIN PAGE
-# -----------------------------
+
 def login_page():
     st.title("CloserAI")
     st.subheader("Login to Continue")
@@ -26,173 +37,204 @@ def login_page():
         email = st.text_input("Email", key="login_email")
         password = st.text_input("Password", type="password", key="login_password")
         if st.button("Login"):
-            success, result = authenticate_user(email, password)
-            if success:
-                st.session_state.authenticated = True
-                st.session_state.user = result
-                st.success("Logged in successfully!")
-                st.rerun()
-            else:
-                st.error(result)
+            try:
+                success, result = authenticate_user(email, password)
+                if success:
+                    st.session_state.authenticated = True
+                    st.session_state.user = result
+                    st.success("Logged in successfully!")
+                    st.rerun()
+                else:
+                    st.error(result)
+            except Exception as exc:
+                st.error(f"Login failed: {exc}")
 
     with tab2:
         email = st.text_input("Email", key="signup_email")
         password = st.text_input("Password", type="password", key="signup_password")
         if st.button("Create Account"):
-            success, message = create_user(email, password)
-            if success:
-                st.success(message)
-            else:
-                st.error(message)
+            try:
+                success, message = create_user(email, password)
+                if success:
+                    st.success(message)
+                else:
+                    st.error(message)
+            except Exception as exc:
+                st.error(f"Sign up failed: {exc}")
 
-# -----------------------------
-# MAIN APP
-# -----------------------------
-def main_app():
-    st.sidebar.title("Navigation")
-    page = st.sidebar.radio(
-        "Go to",
-        ["Analyze Property", "Profile"]
-    )
-
-    if st.sidebar.button("Logout"):
-        logout()
-
-    if page == "Analyze Property":
-        analyze_page()
-    elif page == "Profile":
-        profile_page()
 
 def logout():
     st.session_state.authenticated = False
     st.session_state.user = None
+    st.session_state.selected_client_id = None
     st.rerun()
 
-# -----------------------------
-# ANALYZE PAGE
-# -----------------------------
-def analyze_page():
-    st.title("Analyze Property")
 
-    st.radio(
-        "Are you planning to rent or buy?",
-        ["Rent", "Buy"],
-        horizontal=True,
-        key="housing_choice"
+def _get_clients_for_user(user_id: ObjectId):
+    clients = get_clients_collection()
+    return list(clients.find({"realtor_id": user_id}).sort("created_at", -1))
+
+
+def _create_client_form(user_id: ObjectId):
+    with st.expander("+ Add New Client", expanded=False):
+        with st.form("new_client_form"):
+            name = st.text_input("Client Name")
+            email = st.text_input("Client Email")
+            phone = st.text_input("Client Phone")
+            income = st.number_input("Annual Income", min_value=0.0, step=1000.0)
+            monthly_debt = st.number_input("Monthly Debt Payments", min_value=0.0, step=100.0)
+            savings = st.number_input("Savings Available", min_value=0.0, step=500.0)
+            credit_score = st.slider("Credit Score", 300, 850, 700)
+            preferences = st.text_area("Housing/Lifestyle/School Preferences")
+            notes = st.text_area("Realtor Notes")
+
+            submitted = st.form_submit_button("Create Client")
+            if submitted:
+                if not name.strip():
+                    st.error("Client name is required.")
+                    return
+                doc = {
+                    "realtor_id": user_id,
+                    "name": name.strip(),
+                    "email": email.strip(),
+                    "phone": phone.strip(),
+                    "profile": {
+                        "income": income,
+                        "monthly_debt": monthly_debt,
+                        "savings": savings,
+                        "credit_score": credit_score,
+                    },
+                    "preferences": preferences.strip(),
+                    "notes": notes.strip(),
+                    "created_at": datetime.now(timezone.utc),
+                    "updated_at": datetime.now(timezone.utc),
+                }
+                get_clients_collection().insert_one(doc)
+                st.success("Client created.")
+                st.rerun()
+
+
+def _render_client_sidebar(user_id: ObjectId):
+    st.sidebar.subheader("Clients")
+    _create_client_form(user_id)
+    clients = _get_clients_for_user(user_id)
+
+    if not clients:
+        st.sidebar.info("No clients yet. Add one to begin.")
+        return None
+
+    labels = [f"{c['name']} ({c.get('email','no email')})" for c in clients]
+    idx = 0
+    for i, c in enumerate(clients):
+        if str(c["_id"]) == st.session_state.selected_client_id:
+            idx = i
+            break
+
+    selected_label = st.sidebar.radio("Select a client", labels, index=idx)
+    selected_client = clients[labels.index(selected_label)]
+    st.session_state.selected_client_id = str(selected_client["_id"])
+
+    if st.sidebar.button("Delete Selected Client", type="secondary"):
+        get_clients_collection().delete_one({"_id": selected_client["_id"], "realtor_id": user_id})
+        get_analyses_collection().delete_many({"client_id": selected_client["_id"], "realtor_id": user_id})
+        st.session_state.selected_client_id = None
+        st.success("Client deleted.")
+        st.rerun()
+
+    return selected_client
+
+
+def _save_analysis(realtor_id: ObjectId, client_id: ObjectId, url: str, listing: dict, report: dict):
+    analyses = get_analyses_collection()
+    analyses.insert_one(
+        {
+            "realtor_id": realtor_id,
+            "client_id": client_id,
+            "url": url,
+            "listing": listing,
+            "result": report,
+            "created_at": datetime.now(timezone.utc),
+        }
     )
 
-    url = st.text_input("Paste Listing URL")
 
-    if st.button("Analyze"):
-        if url:
-            run_analysis()
-        else:
-            st.error("Please enter a URL.")
+def _render_analysis_history(realtor_id: ObjectId, client_id: ObjectId):
+    st.subheader("Saved Listing Analyses")
+    analyses = list(
+        get_analyses_collection()
+        .find({"realtor_id": realtor_id, "client_id": client_id})
+        .sort("created_at", -1)
+    )
 
-# -----------------------------
-# PROFILE PAGE (with MongoDB persistence)
-# -----------------------------
-def profile_page():
-    st.title("Your Financial Profile")
-
-    user_doc = st.session_state.get("user")
-    if not user_doc:
-        st.error("User data not found. Please log in again.")
+    if not analyses:
+        st.info("No analyses saved for this client yet.")
         return
 
-    # Use session state to track profile so the UI updates instantly
-    profile = st.session_state.user.get("financial_profile", {})
+    for item in analyses:
+        result = item.get("result", {})
+        with st.expander(f"{item.get('url')} • Fit Score {result.get('fit_score', 'N/A')}"):
+            st.caption(f"Model: {result.get('model_used', 'unknown')}")
+            st.markdown(result.get("report_markdown", "No report available."))
 
-    if "edit_mode" not in st.session_state:
-        st.session_state.edit_mode = False
 
-    # ----------------------------
-    # EDITABLE FORM
-    # ----------------------------
-    if st.session_state.edit_mode:
-        with st.form("profile_form"):
-            income = st.number_input(
-                "Annual Income", value=float(profile.get('income', 0)), step=1000.0
-            )
-            monthly_debt = st.number_input(
-                "Monthly Debt Payments", value=float(profile.get('monthly_debt', 0)), step=100.0
-            )
-            savings = st.number_input(
-                "Savings Available", value=float(profile.get('savings', 0)), step=100.0
-            )
-            credit_score = st.slider(
-                "Credit Score", 300, 850, value=int(profile.get('credit_score', 700))
-            )
+def dashboard_page():
+    st.title("Realtor Dashboard")
+    user = st.session_state.get("user")
+    user_id = user["_id"]
 
-            submitted = st.form_submit_button("Save Changes")
+    selected_client = _render_client_sidebar(user_id)
+    if not selected_client:
+        return
 
-            if submitted:
-                new_profile = {
-                    "income": income,
-                    "monthly_debt": monthly_debt,
-                    "savings": savings,
-                    "credit_score": credit_score
-                }
-                
-                # 1. Update MongoDB
-                users = get_users_collection()
-                users.update_one(
-                    {"_id": user_doc["_id"]},
-                    {"$set": {"financial_profile": new_profile}}
-                )
-
-                # 2. Update session state
-                st.session_state.user["financial_profile"] = new_profile
-                st.session_state.edit_mode = False 
-                
-                # 3. Trigger a rerun to show the Read-Only view with new data
-                st.rerun() 
-        
-        if st.button("Cancel"):
-            st.session_state.edit_mode = False
-            st.rerun()
-
-    # ----------------------------
-    # READ-ONLY VIEW
-    # ----------------------------
-    else:
-        st.write(f"**Annual Income:** ${profile.get('income', 0):,.2f}")
-        st.write(f"**Monthly Debt Payments:** ${profile.get('monthly_debt', 0):,.2f}")
-        st.write(f"**Savings Available:** ${profile.get('savings', 0):,.2f}")
+    col1, col2 = st.columns([1, 2])
+    with col1:
+        st.subheader("Client Profile")
+        st.write(f"**Name:** {selected_client.get('name', '')}")
+        st.write(f"**Email:** {selected_client.get('email', '')}")
+        st.write(f"**Phone:** {selected_client.get('phone', '')}")
+        profile = selected_client.get("profile", {})
+        st.write(f"**Income:** ${profile.get('income', 0):,.0f}")
+        st.write(f"**Monthly Debt:** ${profile.get('monthly_debt', 0):,.0f}")
+        st.write(f"**Savings:** ${profile.get('savings', 0):,.0f}")
         st.write(f"**Credit Score:** {profile.get('credit_score', 700)}")
+        st.write("**Preferences:**")
+        st.write(selected_client.get("preferences", ""))
+        st.write("**Notes:**")
+        st.write(selected_client.get("notes", ""))
 
-        if st.button("Update Information"):
-            st.session_state.edit_mode = True
-            st.rerun() # Force rerun to switch to the form view
+    with col2:
+        st.subheader("Analyze New Listing")
+        url = st.text_input("Paste listing URL (Zillow/Realtor)", key="listing_url")
+        if st.button("Run Analysis", type="primary"):
+            if not url.strip():
+                st.error("Please provide a listing URL.")
+            else:
+                with st.spinner("Scraping listing + generating agent report..."):
+                    try:
+                        listing = scrape_listing(url.strip())
+                        comps = get_area_comps(listing.get("city"), listing.get("state"), max_results=5)
+                        report = generate_listing_report(selected_client, listing, comps)
+                        _save_analysis(user_id, selected_client["_id"], url.strip(), listing, report)
+                        st.success("Analysis saved to client history.")
+                        st.markdown(report["report_markdown"])
+                    except Exception as exc:
+                        st.error(f"Could not complete analysis: {exc}")
 
-# -----------------------------
-# AI LOGIC
-# -----------------------------
-def run_analysis():
-    user_profile = st.session_state.user.get("financial_profile", {})
+    st.divider()
+    _render_analysis_history(user_id, selected_client["_id"])
 
-    rent_or_buy = st.session_state.get("housing_choice", "Buy")
-    income = user_profile.get("income", 0)
-    monthly_debt = user_profile.get("monthly_debt", 0)
-    savings = user_profile.get("savings", 0)
-    credit_score = user_profile.get("credit_score", 700)
 
-    # Demo output (replace with real AI logic)
-    st.subheader("Analysis Results")
-    st.write(f"Housing choice: {rent_or_buy}")
-    st.write(f"Income: ${income}")
-    st.write(f"Monthly Debt: ${monthly_debt}")
-    st.write(f"Savings: ${savings}")
-    st.write(f"Credit Score: {credit_score}")
+def main_app():
+    st.sidebar.title("Navigation")
+    page = st.sidebar.radio("Go to", ["Dashboard"])
 
-    # Example simple affordability check
-    max_monthly_payment = income / 12 * 0.36 - monthly_debt
-    st.write(f"Max recommended monthly payment: ${max_monthly_payment:.2f}")
-    st.success("AI analysis complete!")
+    if st.sidebar.button("Logout"):
+        logout()
 
-# -----------------------------
-# ROUTING LOGIC
-# -----------------------------
+    if page == "Dashboard":
+        dashboard_page()
+
+
 if not st.session_state.authenticated:
     login_page()
 else:
