@@ -1,82 +1,109 @@
 import re
-from homeharvest import scrape_property
+from typing import Any
+
 import pandas as pd
+from homeharvest import scrape_property
 
 
-def extract_address_from_url(url):
-    match = re.search(r'/(?:homedetails|realestateandhomes-detail)/([^/]+)', url)
-    if match:
-        address_part = match.group(1).split('_')[0]
-        address_clean = address_part.replace('-', ' ')
-        return address_clean
-    return None
+def extract_address_from_url(url: str) -> str | None:
+    """Extract a best-effort address token from supported listing URLs."""
+    match = re.search(r"/(?:homedetails|realestateandhomes-detail)/([^/]+)", url)
+    if not match:
+        return None
+    address_part = match.group(1).split("_")[0]
+    return address_part.replace("-", " ")
 
 
-# url = "https://www.zillow.com/homedetails/1616-N-2100-W-Provo-UT-84604/11901038_zpid/"
-# url = "https://www.zillow.com/homedetails/1162-N-Reese-Dr-Provo-UT-84601/79764627_zpid/"
-url = "https://www.zillow.com/homedetails/983-Anderson-Glen-Dr-Cincinnati-OH-45255/34273898_zpid/"
-# url = "https://www.realtor.com/realestateandhomes-detail/23-N-Plum-Crest-Cir_The-Woodlands_TX_77382_M71493-19745"
-address = extract_address_from_url(url)
-
-def get_tax_estimate(price, state, fips_code):
-    # Montgomery County, TX (FIPS 48339) has an avg tax rate of ~1.9% to 2.2%
-    # We use a 2.0% estimate for Texas as a safe bet.
+def get_tax_estimate(price: float, state: str, fips_code: str) -> float:
+    """Estimate annual tax when listing data omits it."""
     if state == "TX":
-        return price * 0.021 # Texas average is high because no state income tax
+        return price * 0.021
+    return price * 0.012
+
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    return float(value) if not pd.isna(value) else default
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    return int(value) if not pd.isna(value) else default
+
+
+def _safe_str(value: Any, default: str = "") -> str:
+    return str(value) if not pd.isna(value) else default
+
+
+def normalize_property_row(row: pd.Series) -> dict[str, Any]:
+    price = _safe_float(row.get("list_price"), 0)
+    state = _safe_str(row.get("state"), "N/A")
+    fips_code = _safe_str(row.get("fips_code"), "N/A")
+
+    raw_tax = row.get("tax")
+    if pd.isna(raw_tax):
+        tax = get_tax_estimate(price, state, fips_code)
+        tax_estimated = True
     else:
-        return price * 0.012 # National average 1.2%
+        tax = float(raw_tax)
+        tax_estimated = False
+
+    return {
+        "price": price,
+        "city": _safe_str(row.get("city"), "Unknown"),
+        "state": state,
+        "zip_code": _safe_str(row.get("zip_code"), "N/A"),
+        "beds": _safe_int(row.get("beds"), 0),
+        "baths": _safe_float(row.get("full_baths"), 0),
+        "sqft": _safe_int(row.get("sqft"), 0),
+        "year_built": _safe_int(row.get("year_built"), 0),
+        "status": _safe_str(row.get("status"), "UNKNOWN").upper(),
+        "hoa_monthly": _safe_float(row.get("hoa_fee"), 0),
+        "fips_code": fips_code,
+        "days_on_mls": _safe_int(row.get("days_on_mls"), 0),
+        "tax_annual": tax,
+        "tax_estimated": tax_estimated,
+        "nearby_schools": row.get("nearby_schools") if not pd.isna(row.get("nearby_schools")) else [],
+        "street": _safe_str(row.get("street"), ""),
+        "latitude": _safe_float(row.get("latitude"), 0),
+        "longitude": _safe_float(row.get("longitude"), 0),
+    }
 
 
-if address:
-    print(f"Searching for: {address}...")
+def scrape_listing(url: str) -> dict[str, Any]:
+    """Scrape and normalize a listing from a Zillow/Realtor URL."""
+    address = extract_address_from_url(url)
+    if not address:
+        raise ValueError("Could not parse address from URL.")
 
-    # We pass a list of types to ensure we catch Pending or Off-Market houses
-    data = scrape_property(
-        location=address,
-        listing_type=["for_sale", "pending", "sold", "off_market"]
-    )
+    data = scrape_property(location=address, listing_type=["for_sale", "pending", "sold", "off_market"])
+    if data.empty:
+        raise ValueError("No listing data found for this URL.")
 
-    if not data.empty:
-        house = data.iloc[0]
-        print(data.columns.tolist())
-
-        # --- CLEAN/SANITIZE VARIABLES ---
-        # This prevents the "Ambiguous NA" error by ensuring every variable is a standard Python type
-        price = float(house['list_price']) if not pd.isna(house['list_price']) else 0
-        city = str(house['city']) if not pd.isna(house['city']) else "Unknown"
-        state = str(house['state']) if not pd.isna(house['state']) else "N/A"
-        zip_code = str(house['zip_code']) if not pd.isna(house['zip_code']) else "N/A"
-        beds = int(house['beds']) if not pd.isna(house['beds']) else 0
-        status = str(house['status']).upper() if not pd.isna(house['status']) else "UNKNOWN"
-        hoa_monthly = float(house['hoa_fee']) if not pd.isna(house['hoa_fee']) else 0
-        fips_code = str(house['fips_code']) if not pd.isna(house['fips_code']) else "N/A"
-        days_on_mls = int(house['days_on_mls']) if not pd.isna(house['days_on_mls']) else 0
-        nearby_schools = house['nearby_schools']
-
-        # Handle Tax (Keep as float for math later)
-        raw_tax = house['tax']
-        if pd.isna(raw_tax):
-            tax = get_tax_estimate(price, state, fips_code)
-            tax_label = f"${tax:,.2f} (ESTIMATED)"
-        else:
-            tax = float(raw_tax)
-            tax_label = f"${tax:,.2f}"
-
-        # --- UPDATED PRINT SECTION ---
-        print("\n--- Property Details ---")
-        print(f"Status:      {status}")
-        print(f"Price:       ${price:,.2f}" if price > 0 else "Price:       N/A")
-        print(f"City:        {city}")
-        print(f"State:       {state}")
-        print(f"Zip:         {zip_code}")
-        print(f"Beds:        {beds}")
-        print(f"HOA Monthly: ${hoa_monthly:,.2f}")
-        print(f"Fips Code:   {fips_code}")
-        print(f"Days on MLS: {days_on_mls}")
-        print(f"Tax per year: {tax_label}")
+    return normalize_property_row(data.iloc[0])
 
 
-    else:
-        print("No results found. The house might be off-market or blocked.")
-else:
-    print("Could not parse address from URL.")
+def get_area_comps(city: str, state: str, max_results: int = 5) -> list[dict[str, Any]]:
+    """Get simple comparable nearby listings for recommendation context."""
+    if not city or not state:
+        return []
+
+    try:
+        data = scrape_property(location=f"{city}, {state}", listing_type=["for_sale"])
+    except Exception:
+        return []
+
+    if data.empty:
+        return []
+
+    comps = []
+    for _, row in data.head(max_results).iterrows():
+        comps.append(
+            {
+                "street": _safe_str(row.get("street"), "Unknown"),
+                "price": _safe_float(row.get("list_price"), 0),
+                "beds": _safe_int(row.get("beds"), 0),
+                "baths": _safe_float(row.get("full_baths"), 0),
+                "sqft": _safe_int(row.get("sqft"), 0),
+                "status": _safe_str(row.get("status"), "").upper(),
+            }
+        )
+    return comps
