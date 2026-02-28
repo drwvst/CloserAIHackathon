@@ -69,7 +69,8 @@ def analyze_page():
     st.radio(
         "Are you planning to rent or buy?",
         ["Rent", "Buy"],
-        horizontal=True  # makes it look cleaner
+        horizontal=True,
+        key="housing_choice"
         )
 
     url = st.text_input("Paste Listing URL")
@@ -77,6 +78,8 @@ def analyze_page():
     if st.button("Analyze"):
         if url:
             st.success("Scraper will run here later.")
+            # Run analysis here (get rid of line above)
+            run_analysis()
         else:
             st.error("Please enter a URL.")
 
@@ -112,3 +115,10 @@ if not st.session_state.authenticated:
     login_page()
 else:
     main_app()
+
+
+# -----------------------------
+# AI Logic 
+# -----------------------------
+def run_analysis(): 
+    rentOrBuy = st.session_state.get("housing_choice")
