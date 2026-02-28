@@ -13,7 +13,8 @@ def extract_address_from_url(url):
 
 
 # url = "https://www.zillow.com/homedetails/1616-N-2100-W-Provo-UT-84604/11901038_zpid/"
-url = "https://www.zillow.com/homedetails/1162-N-Reese-Dr-Provo-UT-84601/79764627_zpid/"
+# url = "https://www.zillow.com/homedetails/1162-N-Reese-Dr-Provo-UT-84601/79764627_zpid/"
+url = "https://www.zillow.com/homedetails/983-Anderson-Glen-Dr-Cincinnati-OH-45255/34273898_zpid/"
 # url = "https://www.realtor.com/realestateandhomes-detail/23-N-Plum-Crest-Cir_The-Woodlands_TX_77382_M71493-19745"
 address = extract_address_from_url(url)
 
@@ -39,37 +40,41 @@ if address:
         house = data.iloc[0]
         print(data.columns.tolist())
 
-        # Extracting the variables
-        price = house['list_price']
-        city = house['city']
-        state = house['state']
-        zip_code = house['zip_code']
-        beds = house['beds']
-        status = house['status']  # <--- NEW VARIABLE
-        hoa_monthly = house['hoa_fee'] if not pd.isna(house['hoa_fee']) else 0
-        fips_code = house['fips_code']
-        days_on_mls = house['days_on_mls']
-        tax = house['tax']
-        tax_history = house['tax_history']
+        # --- CLEAN/SANITIZE VARIABLES ---
+        # This prevents the "Ambiguous NA" error by ensuring every variable is a standard Python type
+        price = float(house['list_price']) if not pd.isna(house['list_price']) else 0
+        city = str(house['city']) if not pd.isna(house['city']) else "Unknown"
+        state = str(house['state']) if not pd.isna(house['state']) else "N/A"
+        zip_code = str(house['zip_code']) if not pd.isna(house['zip_code']) else "N/A"
+        beds = int(house['beds']) if not pd.isna(house['beds']) else 0
+        status = str(house['status']).upper() if not pd.isna(house['status']) else "UNKNOWN"
+        hoa_monthly = float(house['hoa_fee']) if not pd.isna(house['hoa_fee']) else 0
+        fips_code = str(house['fips_code']) if not pd.isna(house['fips_code']) else "N/A"
+        days_on_mls = int(house['days_on_mls']) if not pd.isna(house['days_on_mls']) else 0
+        nearby_schools = house['nearby_schools']
 
-        # Tax non-disclosure Handling:
-        if pd.isna(tax):
+        # Handle Tax (Keep as float for math later)
+        raw_tax = house['tax']
+        if pd.isna(raw_tax):
             tax = get_tax_estimate(price, state, fips_code)
-            print(f"Tax per year (ESTIMATED): ${tax:,.2f}")
+            tax_label = f"${tax:,.2f} (ESTIMATED)"
         else:
-            print(f"Tax per year: ${tax:,.2f}")
+            tax = float(raw_tax)
+            tax_label = f"${tax:,.2f}"
 
+        # --- UPDATED PRINT SECTION ---
         print("\n--- Property Details ---")
-        print(f"Status: {status.upper()}")  # Prints FOR_SALE, PENDING, etc.
-        print(f"Price:  ${price:,}" if price else "Price:  N/A")
-        print(f"City:   {city}")
-        print(f"State:  {state}")
-        print(f"Zip:    {zip_code}")
-        print(f"Beds:   {beds}")
-        print(f"HOA Monthly:   {hoa_monthly}")
+        print(f"Status:      {status}")
+        print(f"Price:       ${price:,.2f}" if price > 0 else "Price:       N/A")
+        print(f"City:        {city}")
+        print(f"State:       {state}")
+        print(f"Zip:         {zip_code}")
+        print(f"Beds:        {beds}")
+        print(f"HOA Monthly: ${hoa_monthly:,.2f}")
         print(f"Fips Code:   {fips_code}")
-        print(f"Days on Multiple listing service (mls):   {days_on_mls}")
-        print(f"Tax per year:   {tax}")
+        print(f"Days on MLS: {days_on_mls}")
+        print(f"Tax per year: {tax_label}")
+
 
     else:
         print("No results found. The house might be off-market or blocked.")
