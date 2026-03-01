@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from pathlib import Path
 
 import streamlit as st
 from bson import ObjectId
@@ -19,7 +20,7 @@ if "selected_client_id" not in st.session_state:
 
 
 def login_page():
-    st.title("CloserAI")
+    st.title("Agent²")
     st.subheader("Login to Continue")
 
     tab1, tab2 = st.tabs(["Login", "Sign Up"])
@@ -482,28 +483,53 @@ def dashboard_page():
 
 
 def _sidebar_nav():
-    st.sidebar.markdown("# CloserAI")
-    st.sidebar.markdown("---")
+    # 1. Get the directory of the current script (app.py)
+    # This works even if you are in the 'website' directory
+    script_directory = Path(__file__).parent
+    logo_path = script_directory / "Agents Squared Logo.png"
 
-    # Initialize the current page in session state if not there
+    # 2. Custom CSS for Sidebar Styling
+    st.markdown("""
+        <style>
+        [data-testid="stSidebar"] h1 {
+            text-align: left;
+            margin-top: -20px;
+        }
+        button:has(.logout-text) {
+            background-color: #ff4b4b !important;
+            color: white !important;
+            border: none !important;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+
+    # 3. Defensive check before trying to load the image
+    if logo_path.exists():
+        st.sidebar.image(str(logo_path), use_container_width=True)
+    else:
+        st.sidebar.error(f"Missing Logo: Please ensure '{logo_path.name}' is in the {script_directory} folder.")
+        # Fallback to text title if image fails
+        st.sidebar.markdown("# Agent$^2$")
+    
+    st.sidebar.markdown("---")
+    
     if "current_page" not in st.session_state:
         st.session_state.current_page = "Dashboard"
 
-    # Navigation Buttons with unique styling
-    # We use 'use_container_width' to make them large and fill the sidebar
-    if st.sidebar.button("Dashboard", use_container_width=True,
+    # 3. Navigation Buttons
+    if st.sidebar.button("Dashboard", use_container_width=True, 
                          type="primary" if st.session_state.current_page == "Dashboard" else "secondary"):
         st.session_state.current_page = "Dashboard"
         st.rerun()
 
-    if st.sidebar.button("Manage Clients", use_container_width=True,
+    if st.sidebar.button("Manage Clients", use_container_width=True, 
                          type="primary" if st.session_state.current_page == "Manage Clients" else "secondary"):
         st.session_state.current_page = "Manage Clients"
         st.rerun()
 
     st.sidebar.markdown("---")
-
-    # Logout button at the very bottom
+    
+    # 4. Red Logout Button
     if st.sidebar.button("Logout", use_container_width=True):
         logout()
 
