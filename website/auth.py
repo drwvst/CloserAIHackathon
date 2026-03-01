@@ -4,8 +4,16 @@ from database import get_users_collection
 def hash_password(password: str) -> bytes:
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt())
 
-def verify_password(password: str, hashed: bytes) -> bool:
-    return bcrypt.checkpw(password.encode("utf-8"), hashed)
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """
+    Checks a plain-text password against a stored hash.
+    Both must be converted to bytes for bcrypt.
+    """
+    # .encode('utf-8') turns the strings into the 'PyBytes' bcrypt expects
+    return bcrypt.checkpw(
+        plain_password.encode('utf-8'), 
+        hashed_password.encode('utf-8')
+    )
 
 def create_user(email: str, password: str):
     users = get_users_collection()
