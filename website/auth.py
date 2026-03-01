@@ -4,16 +4,21 @@ from database import get_users_collection
 def hash_password(password: str) -> bytes:
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt())
 
-def verify_password(plain_password: str, hashed_password: str) -> bool:
+def verify_password(plain_password: str, hashed_password: str | bytes) -> bool:
     """
     Checks a plain-text password against a stored hash.
-    Both must be converted to bytes for bcrypt.
+    Safely handles both string and bytes inputs from MongoDB.
     """
-    # .encode('utf-8') turns the strings into the 'PyBytes' bcrypt expects
-    return bcrypt.checkpw(
-        plain_password.encode('utf-8'), 
-        hashed_password.encode('utf-8')
-    )
+    # 1. Plain password from user input is always a string, so encode it
+    password_bytes = plain_password.encode('utf-8')
+
+    # 2. Hashed password from DB might be a string OR bytes
+    if isinstance(hashed_password, str):
+        hash_bytes = hashed_password.encode('utf-8')
+    else:
+        hash_bytes = hashed_password  # It's already bytes, don't re-encode!
+
+    return bcrypt.checkpw(password_bytes, hash_bytes)
 
 def create_user(email: str, password: str):
     users = get_users_collection()

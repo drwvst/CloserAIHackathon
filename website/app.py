@@ -8,7 +8,7 @@ from auth import authenticate_user, create_user
 from database import get_analyses_collection, get_clients_collection
 from ZillowScraper import get_area_comps, scrape_listing
 
-st.set_page_config(page_title="CloserAI", layout="wide")
+st.set_page_config(page_title="Agent", layout="wide")
 
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
