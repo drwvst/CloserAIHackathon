@@ -66,7 +66,6 @@ def clients_page():
         st.session_state.reg_expanded = False
 
     # 2. SECTION 1: ADD NEW CLIENT
-    # We use a button to open it, and the form submission to close it
     if not st.session_state.reg_expanded:
         if st.button("➕ Register New Client"):
             st.session_state.reg_expanded = True
@@ -113,7 +112,6 @@ def clients_page():
                         }
                         get_clients_collection().insert_one(new_doc)
 
-                        # Set to False so it's closed on rerun
                         st.session_state.reg_expanded = False
                         st.toast(f"Success! {name} added.", icon="✅")
                         st.rerun()
@@ -122,7 +120,6 @@ def clients_page():
 
     st.divider()
 
-    # --- SECTION 2: VIEW & UPDATE EXISTING CLIENTS ---
     clients = _get_clients_for_user(user_id)
     if not clients:
         st.info("No clients found. Open the registration tool above to add your first one.")
@@ -135,11 +132,9 @@ def clients_page():
 
     st.divider()
 
-    # Initialize edit mode state
     if "edit_client_id" not in st.session_state:
         st.session_state.edit_client_id = None
 
-    # --- EDIT MODE ---
     if st.session_state.edit_client_id == str(client_id):
         with st.form("update_client_form"):
             st.subheader(f"Updating {selected_client['name']}")
@@ -173,10 +168,7 @@ def clients_page():
             if col_can.form_submit_button("Cancel"):
                 st.session_state.edit_client_id = None
                 st.rerun()
-
-    # --- READ-ONLY VIEW ---
     else:
-        # 1. Header and Action Buttons
         c_head, c_edit, c_del = st.columns([3, 1, 1])
         c_head.subheader(f"Details: {selected_client['name']}")
 
@@ -187,17 +179,12 @@ def clients_page():
         if c_del.button("Delete Client", type="primary", use_container_width=True):
             st.session_state.confirm_delete = str(client_id)
 
-        # (Keep your Confirmation Dialog Logic here...)
         if st.session_state.get("confirm_delete") == str(client_id):
-            # ... [Your existing confirmation logic] ...
-            pass  # placeholder for brevity
+            pass 
 
         st.divider()
 
-        # 2. Financial Metrics (The Fix)
         p = selected_client.get("profile", {})
-
-        # We'll use 4 columns to display the core financials cleanly
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Annual Income", f"${p.get('income', 0):,.0f}")
         m2.metric("Monthly Debt", f"${p.get('monthly_debt', 0):,.0f}")
@@ -205,16 +192,13 @@ def clients_page():
         m4.metric("Credit Score", p.get('credit_score', 'N/A'))
 
         st.markdown("---")
-
-        # 3. Contact & Text Information
         col_contact, col_pref = st.columns(2)
 
         with col_contact:
             st.markdown("### Contact Info")
             st.write(f"📧 **Email:** {selected_client.get('email', 'N/A')}")
             st.write(f"📞 **Phone:** {selected_client.get('phone', 'N/A')}")
-            st.write(
-                f"📅 **Added:** {selected_client.get('created_at').strftime('%Y-%m-%d') if selected_client.get('created_at') else 'N/A'}")
+            st.write(f"📅 **Added:** {selected_client.get('created_at').strftime('%Y-%m-%d') if selected_client.get('created_at') else 'N/A'}")
 
         with col_pref:
             st.markdown("### Client Preferences")
@@ -242,75 +226,6 @@ def _get_clients_for_user(user_id: ObjectId):
     return list(clients.find({"realtor_id": user_id}).sort("created_at", -1))
 
 
-def _create_client_form(user_id: ObjectId):
-    with st.sidebar.expander("+ Add New Client", expanded=False):
-        with st.form("new_client_form"):
-            name = st.text_input("Client Name")
-            email = st.text_input("Client Email")
-            phone = st.text_input("Client Phone")
-            income = st.number_input("Annual Income", min_value=0.0, step=1000.0)
-            monthly_debt = st.number_input("Monthly Debt Payments", min_value=0.0, step=100.0)
-            savings = st.number_input("Savings Available", min_value=0.0, step=500.0)
-            credit_score = st.slider("Credit Score", 300, 850, 700)
-            preferences = st.text_area("Housing/Lifestyle/School Preferences")
-            notes = st.text_area("Realtor Notes")
-
-            submitted = st.form_submit_button("Create Client")
-            if submitted:
-                if not name.strip():
-                    st.error("Client name is required.")
-                    return
-                doc = {
-                    "realtor_id": user_id,
-                    "name": name.strip(),
-                    "email": email.strip(),
-                    "phone": phone.strip(),
-                    "profile": {
-                        "income": income,
-                        "monthly_debt": monthly_debt,
-                        "savings": savings,
-                        "credit_score": credit_score,
-                    },
-                    "preferences": preferences.strip(),
-                    "notes": notes.strip(),
-                    "created_at": datetime.now(timezone.utc),
-                    "updated_at": datetime.now(timezone.utc),
-                }
-                get_clients_collection().insert_one(doc)
-                st.success("Client created.")
-                st.rerun()
-
-
-def _render_client_sidebar(user_id: ObjectId):
-    st.sidebar.subheader("Clients")
-    _create_client_form(user_id)
-    clients = _get_clients_for_user(user_id)
-
-    if not clients:
-        st.sidebar.info("No clients yet. Add one to begin.")
-        return None
-
-    labels = [f"{c['name']} ({c.get('email', 'no email')})" for c in clients]
-    idx = 0
-    for i, c in enumerate(clients):
-        if str(c["_id"]) == st.session_state.selected_client_id:
-            idx = i
-            break
-
-    selected_label = st.sidebar.radio("Select a client", labels, index=idx)
-    selected_client = clients[labels.index(selected_label)]
-    st.session_state.selected_client_id = str(selected_client["_id"])
-
-    if st.sidebar.button("Delete Selected Client", type="secondary"):
-        get_clients_collection().delete_one({"_id": selected_client["_id"], "realtor_id": user_id})
-        get_analyses_collection().delete_many({"client_id": selected_client["_id"], "realtor_id": user_id})
-        st.session_state.selected_client_id = None
-        st.success("Client deleted.")
-        st.rerun()
-
-    return selected_client
-
-
 def _save_analysis(realtor_id: ObjectId, client_id: ObjectId, url: str, listing: dict, report: dict):
     analyses = get_analyses_collection()
     analyses.insert_one(
@@ -326,7 +241,7 @@ def _save_analysis(realtor_id: ObjectId, client_id: ObjectId, url: str, listing:
 
 
 def _render_analysis_history(realtor_id: ObjectId, client_id: ObjectId):
-    st.subheader("Favorite Listings")  # Renamed from 'Saved Analyses'
+    st.subheader("Favorite Listings")
 
     analyses = list(
         get_analyses_collection()
@@ -343,15 +258,7 @@ def _render_analysis_history(realtor_id: ObjectId, client_id: ObjectId):
         listing_data = item.get("listing", {})
 
         with st.container(border=True):
-            # Column 1: Placeholder for Photo
-            # Column 2: Address and Score
-            # Column 3: Delete Button
-            col_thumb, col_info, col_del = st.columns([1, 4, 1])
-
-            with col_thumb:
-                # img_url = listing_data.get("img_src")
-                # st.image(img_url, use_container_width=True)
-                st.markdown("🏠")
+            col_info, col_del = st.columns([5, 1])
 
             with col_info:
                 street = listing_data.get("street", "Unknown Address")
@@ -363,8 +270,7 @@ def _render_analysis_history(realtor_id: ObjectId, client_id: ObjectId):
                 st.markdown(f"**Fit Score:** {score}/100")
 
             with col_del:
-                # Unique key is essential because we are in a loop
-                if st.button("🗑️", key=f"del_{item['_id']}"):
+                if st.button("🗑️", key=f"del_{item['_id']}", use_container_width=True):
                     get_analyses_collection().delete_one({"_id": item["_id"]})
                     st.toast("Removed from favorites")
                     st.rerun()
@@ -374,7 +280,6 @@ def _render_analysis_history(realtor_id: ObjectId, client_id: ObjectId):
 
 
 def dashboard_page():
-    # 1. Fetch Data
     user_id = st.session_state.user["_id"]
     clients = _get_clients_for_user(user_id)
 
@@ -383,44 +288,34 @@ def dashboard_page():
         st.warning("No clients found. Go to 'Manage Clients' to register one.")
         return
 
-    # 2. Top-Level Selection (Moved from sidebar)
     st.subheader("Selected Client")
     client_labels = [c["name"] for c in clients]
-
-    # Maintain selection index
     current_idx = 0
     for i, c in enumerate(clients):
         if str(c["_id"]) == st.session_state.selected_client_id:
             current_idx = i
             break
 
-    # Horizontal selection at the top
     selected_name = st.selectbox(
         "Choose a client to analyze properties for:",
         options=client_labels,
         index=current_idx,
-        label_visibility="collapsed"  # Hides the redundant label for a cleaner look
+        label_visibility="collapsed"
     )
 
     active_client = next(c for c in clients if c["name"] == selected_name)
     st.session_state.selected_client_id = str(active_client["_id"])
 
     st.divider()
-
-    # 3. Formatted Quick View (Fixed the "code formatting" issue)
     st.markdown(f"### Financial Overview: {active_client['name']}")
     p = active_client.get("profile", {})
-
-    # Using columns and metrics for a polished, "Dashboard" feel
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Annual Income", f"${p.get('income', 0):,.0f}")
     m2.metric("Monthly Debt", f"${p.get('monthly_debt', 0):,.0f}")
-    m3.metric("Total Savings", f"${p.get('savings', 0):,.0f}")
+    m3.metric("Savings", f"${p.get('savings', 0):,.0f}")
     m4.metric("Credit Score", p.get('credit_score', 'N/A'))
 
     st.divider()
-
-    # 4. Analysis Section
     st.subheader("Analyze New Listing")
     url = st.text_input("Paste listing URL (Zillow/Realtor)", key="listing_url",
                         placeholder="https://www.zillow.com/homedetails/...")
@@ -435,7 +330,6 @@ def dashboard_page():
                     comps = get_area_comps(listing.get("city"), listing.get("state"), max_results=5)
                     report = generate_listing_report(active_client, listing, comps)
 
-                    # Store in session state for a "Preview" before saving
                     st.session_state.temp_analysis = {
                         "url": url.strip(),
                         "listing": listing,
@@ -445,70 +339,42 @@ def dashboard_page():
                 except Exception as exc:
                     st.error(f"Analysis failed: {exc}")
 
-    # --- Persisted Report View ---
-    # This section stays visible even after clicking 'Add to Favorites'
     if "temp_analysis" in st.session_state:
         temp = st.session_state.temp_analysis
         st.divider()
         st.markdown("### New Analysis Preview")
         st.markdown(temp["result"]["report_markdown"])
 
-        # We use a specific column ratio to keep them tight or wide.
-        # [1, 1] ensures the space is split exactly 50/50.
         btn_col1, btn_col2 = st.columns([1, 1])
-
         with btn_col1:
             if st.button("Add to Favorites", type="primary", use_container_width=True):
-                _save_analysis(
-                    user_id,
-                    active_client["_id"],
-                    temp["url"],
-                    temp["listing"],
-                    temp["result"]
-                )
+                _save_analysis(user_id, active_client["_id"], temp["url"], temp["listing"], temp["result"])
                 del st.session_state.temp_analysis
                 st.toast("Listing added to favorites!", icon="⭐")
                 st.rerun()
-
         with btn_col2:
-            # type="primary" makes it red.
-            # use_container_width=True forces it to match the 'Add' button size exactly.
             if st.button("Discard Analysis", use_container_width=True):
                 del st.session_state.temp_analysis
                 st.rerun()
 
-    # 5. Restore the Favorites History
     st.divider()
     _render_analysis_history(user_id, active_client["_id"])
 
 
 def _sidebar_nav():
-    # 1. Get the directory of the current script (app.py)
-    # This works even if you are in the 'website' directory
     script_directory = Path(__file__).parent
     logo_path = script_directory / "Agents Squared Logo.png"
 
-    # 2. Custom CSS for Sidebar Styling
     st.markdown("""
         <style>
-        [data-testid="stSidebar"] h1 {
-            text-align: left;
-            margin-top: -20px;
-        }
-        button:has(.logout-text) {
-            background-color: #ff4b4b !important;
-            color: white !important;
-            border: none !important;
-        }
+        [data-testid="stSidebar"] h1 { text-align: left; margin-top: -20px; }
+        button:has(.logout-text) { background-color: #ff4b4b !important; color: white !important; border: none !important; }
         </style>
     """, unsafe_allow_html=True)
 
-    # 3. Defensive check before trying to load the image
     if logo_path.exists():
         st.sidebar.image(str(logo_path), use_container_width=True)
     else:
-        st.sidebar.error(f"Missing Logo: Please ensure '{logo_path.name}' is in the {script_directory} folder.")
-        # Fallback to text title if image fails
         st.sidebar.markdown("# Agent$^2$")
     
     st.sidebar.markdown("---")
@@ -516,7 +382,6 @@ def _sidebar_nav():
     if "current_page" not in st.session_state:
         st.session_state.current_page = "Dashboard"
 
-    # 3. Navigation Buttons
     if st.sidebar.button("Dashboard", use_container_width=True, 
                          type="primary" if st.session_state.current_page == "Dashboard" else "secondary"):
         st.session_state.current_page = "Dashboard"
@@ -528,17 +393,12 @@ def _sidebar_nav():
         st.rerun()
 
     st.sidebar.markdown("---")
-    
-    # 4. Red Logout Button
     if st.sidebar.button("Logout", use_container_width=True):
         logout()
 
 
 def main_app():
-    # 1. Render the new custom sidebar
     _sidebar_nav()
-
-    # 2. Render the actual page based on the button clicked
     if st.session_state.current_page == "Dashboard":
         dashboard_page()
     elif st.session_state.current_page == "Manage Clients":
